@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover" />
+    <title>2027 新年快樂 AR 自拍相框</title>
+    <!-- 引入 A-Frame 與 MindAR 人臉辨識庫 -->
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-face-aframe.prod.js"></script>
+    <style>
+      body { margin: 0; overflow: hidden; font-family: 'Microsoft JhengHei', sans-serif; background-color: #000; }
+      
+      /* 固定在螢幕最前端的新年相框 PNG 覆蓋層 */
+      #overlay-frame {
+        position: fixed;
+        top: 0; left: 0;
+        width: 100vw; height: 100vh;
+        background-image: url('./newyear.png'); /* 這裡已套用你的相框 newyear.png */
+        background-size: cover;
+        background-position: center;
+        pointer-events: none; /* 穿透點擊，不影響下方 A-Frame 控制 */
+        z-index: 100;
+      }
+
+      /* 介面按鈕區 */
+      .ui-container {
+        position: fixed;
+        bottom: 40px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        z-index: 999;
+        gap: 15px;
+      }
+
+      /* 拍照按鈕 */
+      #capture-btn {
+        width: 76px; height: 76px;
+        border-radius: 50%;
+        background: #ff3b30; /* 新年喜慶紅 */
+        border: 5px solid #fff;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+        cursor: pointer;
+        transition: transform 0.1s ease;
+      }
+      #capture-btn:active { transform: scale(0.9); }
+
+      /* 溫馨提示文字 */
+      .tip-text {
+        color: #fff;
+        text-shadow: 0 2px 5px rgba(0,0,0,0.8);
+        font-size: 14px;
+        background: rgba(139, 0, 0, 0.6); /* 暗紅半透明背景 */
+        padding: 5px 15px;
+        border-radius: 15px;
+        border: 1px solid #ffd700; /* 金邊 */
+        font-weight: bold;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 1. 新年相框圖層 -->
+    <div id="overlay-frame"></div>
+    
+    <!-- 2. UI 按鈕與提示 -->
+    <div class="ui-container">
+      <div class="tip-text">🧧 看向鏡頭，按下紅色按鈕存檔 🧧</div>
+      <button id="capture-btn" onclick="takeNewYearSnapshot()"></button>
+    </div>
+
+    <!-- 3. AR 臉部辨識場景 (開啟前置鏡頭並開始追蹤) -->
+    <a-scene 
+      mindar-face="autoStart: true; faceOccluder: true" 
+      embedded 
+      color-space="sRGB" 
+      vr-mode-ui="enabled: false" 
+      device-orientation-permission-ui="enabled: false">
+      
+      <a-camera active="true" position="0 0 0" look-controls="enabled: false"></a-camera>
+
+      <!-- 臉部定位點 (雖然我們用全螢幕固定相框，但保留這個定位點可擴充頭戴裝飾，如 AR 舞獅頭或兔耳) -->
+      <a-entity mindar-face-target="anchorIndex: 168">
+        <!-- 如果未來想在人臉上疊加 3D 道具，可以放這裏 -->
+      </a-entity>
+    </a-scene>
+
+    <script>
+      // 拍照並儲存功能
+      function takeNewYearSnapshot() {
+        const scene = document.querySelector('a-scene');
+        // A-Frame 截圖組件會擷取當前相機畫面，並與 newyear.png 合併
+        scene.components.screenshot.getCanvas('perspective').toBlob((blob) => {
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `NewYear_AR_Photo_${Date.now()}.png`;
+          link.click();
+        });
+      }
+    </script>
+  </body>
+</html>
