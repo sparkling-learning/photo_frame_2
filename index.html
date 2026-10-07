@@ -10,6 +10,7 @@
     <style>
       * {
         box-sizing: border-box;
+        touch-action: none; /* 防止手機手勢干擾拖曳 */
       }
       body, html {
         margin: 0;
@@ -31,19 +32,18 @@
         overflow: hidden;
       }
 
-      /* 鏡頭畫面：透過 class 控制自拍鏡像翻轉 */
+      /* 鏡頭畫面：支援縮放與平移 */
       #camera-video {
         position: absolute;
         width: 100%;
         height: 100%;
         object-fit: cover;
         z-index: 1;
-      }
-      .mirror {
-        transform: scaleX(-1);
+        transform-origin: center center;
+        will-change: transform;
       }
 
-      /* 相框層：已更新為 photo_frame.png，contain 確保整幅相框 100% 完整露出 */
+      /* 相框層：photo_frame.png 置頂完整顯示 */
       #frame-overlay {
         position: absolute;
         width: 100%;
@@ -56,7 +56,7 @@
         z-index: 2;
       }
 
-      /* 開場授權遮罩層（確保順利獲取相機權限） */
+      /* 開場授權遮罩層 */
       #start-screen {
         position: fixed;
         top: 0;
@@ -99,7 +99,41 @@
         cursor: pointer;
       }
 
-      /* 操作控制區 */
+      /* 縮放微調控制列（相框位置小專用） */
+      .zoom-panel {
+        position: fixed;
+        right: 16px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        padding: 12px 8px;
+        border-radius: 24px;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        z-index: 10;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+      }
+
+      .zoom-btn {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.2);
+        color: #fff;
+        border: none;
+        font-size: 18px;
+        font-weight: bold;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      }
+
+      /* 底部操作區 */
       .ui-bar {
         position: fixed;
         bottom: calc(20px + env(safe-area-inset-bottom));
@@ -108,7 +142,7 @@
         display: none;
         flex-direction: column;
         align-items: center;
-        gap: 12px;
+        gap: 10px;
         z-index: 10;
       }
 
@@ -168,21 +202,29 @@
     </style>
   </head>
   <body>
-    <!-- 1. 開場點擊層 -->
+    <!-- 開場引導點擊層 -->
     <div id="start-screen">
       <div class="start-title">📸 AR 自拍相框 📸</div>
       <div class="start-desc">請點擊下方按鈕並允許相機權限<br>即可開始合照體驗</div>
       <button id="start-btn" onclick="userStart()">開啟相機</button>
     </div>
 
-    <div id="stage-container">
-      <video id="camera-video" class="mirror" autoplay playsinline muted></video>
+    <!-- 舞台畫面區 (支援單指滑動調整人像位置) -->
+    <div id="stage-container" id="stage">
+      <video id="camera-video" autoplay playsinline muted></video>
       <div id="frame-overlay"></div>
     </div>
 
-    <!-- 2. 操作按鈕列 -->
+    <!-- 側邊縮放調整器：解決相框人臉空間太細的問題 -->
+    <div class="zoom-panel" id="zoom-panel">
+      <button class="zoom-btn" onclick="changeZoom(0.1)">＋</button>
+      <span id="zoom-val" style="color: #fff; font-size: 11px;">1.0x</span>
+      <button class="zoom-btn" onclick="changeZoom(-0.1)">－</button>
+    </div>
+
+    <!-- 底部操作列 -->
     <div class="ui-bar" id="ui-bar">
-      <div class="hint">按下拍照鍵 即可存入相簿</div>
+      <div class="hint">可單指滑動或按右側「－」縮小人像</div>
       <div class="btn-row">
         <div style="width: 48px;"></div>
         <button id="shutter-btn" onclick="captureAndSave()" aria-label="拍照"></button>
@@ -201,18 +243,57 @@
       const canvas = document.getElementById('render-canvas');
       const startScreen = document.getElementById('start-screen');
       const uiBar = document.getElementById('ui-bar');
-      
-      // 已將相框來源更新為 photo_frame.png
+      const zoomPanel = document.getElementById('zoom-panel');
+      const zoomVal = document.getElementById('zoom-val');
+      const stage = document.getElementById('stage-container');
+
       const frameImg = new Image();
       frameImg.src = './photo_frame.png';
 
       let currentFacingMode = 'user';
       let currentStream = null;
 
-      // 使用者點擊按鈕啟用鏡頭
+      // 人像縮放與位置參數
+      let scale = 0.85; // 預設微調為 0.85x，避免人臉過大塞不進相框
+      let offsetX = 0;
+      let offsetY = 0;
+
+      function updateVideoTransform() {
+        const mirror = currentFacingMode === 'user' ? -1 : 1;
+        video.style.transform = `translate(${offsetX}px, ${offsetY}px) scaleX(${mirror * scale}) scaleY(${scale})`;
+        zoomVal.innerText = `${scale.toFixed(1)}x`;
+      }
+
+      function changeZoom(delta) {
+        scale = Math.min(Math.max(0.4, scale + delta), 2.0); // 最小可縮至 0.4x
+        updateVideoTransform();
+      }
+
+      // 單指拖曳人像對準相框孔位
+      let isDragging = false;
+      let startX, startY;
+
+      stage.addEventListener('pointerdown', (e) => {
+        isDragging = true;
+        startX = e.clientX - offsetX;
+        startY = e.clientY - offsetY;
+      });
+
+      window.addEventListener('pointermove', (e) => {
+        if (!isDragging) return;
+        offsetX = e.clientX - startX;
+        offsetY = e.clientY - startY;
+        updateVideoTransform();
+      });
+
+      window.addEventListener('pointerup', () => { isDragging = false; });
+      window.addEventListener('pointercancel', () => { isDragging = false; });
+
+      // 使用者點擊啟動
       async function userStart() {
         startScreen.style.display = 'none';
         uiBar.style.display = 'flex';
+        zoomPanel.style.display = 'flex';
         await initCamera(currentFacingMode);
       }
 
@@ -233,13 +314,8 @@
 
           currentStream = await navigator.mediaDevices.getUserMedia(constraints);
           video.srcObject = currentStream;
-
-          if (facingMode === 'user') {
-            video.classList.add('mirror');
-          } else {
-            video.classList.remove('mirror');
-          }
           currentFacingMode = facingMode;
+          updateVideoTransform();
         } catch (err) {
           alert('請確保於 Safari / Chrome 打開，並允許使用相機權限。');
           console.error(err);
@@ -251,7 +327,7 @@
         initCamera(targetMode);
       }
 
-      // 合成照片並喚起原生分享直接存入手機相簿
+      // 拍照並按照調整好的縮放與位移精準合成
       async function captureAndSave() {
         if (!video.videoWidth || !frameImg.complete) return;
 
@@ -262,38 +338,46 @@
         canvas.height = targetHeight;
         const ctx = canvas.getContext('2d');
 
-        // 計算裁切比例使其在相框背後自然填滿
+        // 基準比例計算
         const vWidth = video.videoWidth;
         const vHeight = video.videoHeight;
         const videoRatio = vWidth / vHeight;
         const frameRatio = targetWidth / targetHeight;
 
-        let sWidth, sHeight, sx, sy;
+        let baseWidth, baseHeight;
         if (videoRatio > frameRatio) {
-          sHeight = vHeight;
-          sWidth = vHeight * frameRatio;
-          sx = (vWidth - sWidth) / 2;
-          sy = 0;
+          baseHeight = targetHeight;
+          baseWidth = targetHeight * videoRatio;
         } else {
-          sWidth = vWidth;
-          sHeight = vWidth / frameRatio;
-          sx = 0;
-          sy = (vHeight - sHeight) / 2;
+          baseWidth = targetWidth;
+          baseHeight = targetWidth / videoRatio;
         }
 
-        // 繪製人像影像（自拍時保留鏡像）
+        // 計算縮放及使用者螢幕拖曳映射至畫布的比例
+        const screenWidth = window.innerWidth;
+        const screenHeight = window.innerHeight;
+        const mappedOffsetX = (offsetX / screenWidth) * targetWidth;
+        const mappedOffsetY = (offsetY / screenHeight) * targetHeight;
+
+        const drawWidth = baseWidth * scale;
+        const drawHeight = baseHeight * scale;
+
         ctx.save();
+        // 移動至畫布中央並加上使用者的平移位移
+        ctx.translate((targetWidth / 2) + mappedOffsetX, (targetHeight / 2) + mappedOffsetY);
+
         if (currentFacingMode === 'user') {
-          ctx.translate(targetWidth, 0);
           ctx.scale(-1, 1);
         }
-        ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, targetWidth, targetHeight);
+
+        // 居中繪製縮放後的人像
+        ctx.drawImage(video, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
         ctx.restore();
 
-        // 疊加相框層
+        // 疊加相框層 (photo_frame.png)
         ctx.drawImage(frameImg, 0, 0, targetWidth, targetHeight);
 
-        // 封裝圖檔並調用系統分享介面
+        // 儲存至相簿
         canvas.toBlob(async (blob) => {
           const file = new File([blob], `PhotoFrame_${Date.now()}.png`, { type: 'image/png' });
 
