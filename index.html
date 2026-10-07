@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <title>AR 互動自拍相框</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body, html {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background-color: #000;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+
+      #stage-container {
+        position: relative;
+        width: 100vw;
+        height: 100dvh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        overflow: hidden;
+      }
+
+      /* 鏡頭畫面：透過 class 控制自拍鏡像翻轉 */
+      #camera-video {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        z-index: 1;
+      }
+      .mirror {
+        transform: scaleX(-1);
+      }
+
+      /* 相框層：已更新為 photo_frame.png，contain 確保整幅相框 100% 完整露出 */
+      #frame-overlay {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        background-image: url('./photo_frame.png');
+        background-repeat: no-repeat;
+        background-position: center center;
+        background-size: contain;
+        pointer-events: none;
+        z-index: 2;
+      }
+
+      /* 開場授權遮罩層（確保順利獲取相機權限） */
+      #start-screen {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100dvh;
+        background: rgba(0, 0, 0, 0.85);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 9999;
+        padding: 20px;
+        text-align: center;
+      }
+
+      .start-title {
+        color: #ffd700;
+        font-size: 24px;
+        font-weight: bold;
+        margin-bottom: 12px;
+      }
+
+      .start-desc {
+        color: #fff;
+        font-size: 15px;
+        margin-bottom: 28px;
+        line-height: 1.5;
+      }
+
+      #start-btn {
+        background: linear-gradient(135deg, #e60012, #ff4a4a);
+        color: #fff;
+        font-size: 18px;
+        font-weight: bold;
+        padding: 14px 36px;
+        border-radius: 30px;
+        border: 2px solid #ffd700;
+        box-shadow: 0 4px 20px rgba(230, 0, 18, 0.5);
+        cursor: pointer;
+      }
+
+      /* 操作控制區 */
+      .ui-bar {
+        position: fixed;
+        bottom: calc(20px + env(safe-area-inset-bottom));
+        left: 0;
+        width: 100%;
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        z-index: 10;
+      }
+
+      .btn-row {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 32px;
+      }
+
+      #shutter-btn {
+        width: 74px;
+        height: 74px;
+        border-radius: 50%;
+        background: #e60012;
+        border: 4px solid #fff;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+        cursor: pointer;
+        transition: transform 0.1s;
+      }
+      #shutter-btn:active {
+        transform: scale(0.9);
+      }
+
+      #switch-btn {
+        width: 48px;
+        height: 48px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.25);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        border: 2px solid rgba(255, 255, 255, 0.8);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      }
+      #switch-btn svg {
+        width: 24px;
+        height: 24px;
+        fill: #fff;
+      }
+
+      .hint {
+        color: #fff;
+        font-size: 13px;
+        font-weight: 600;
+        background: rgba(0, 0, 0, 0.6);
+        padding: 6px 16px;
+        border-radius: 20px;
+        border: 1px solid rgba(255, 215, 0, 0.8);
+      }
+
+      #render-canvas {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- 1. 開場點擊層 -->
+    <div id="start-screen">
+      <div class="start-title">📸 AR 自拍相框 📸</div>
+      <div class="start-desc">請點擊下方按鈕並允許相機權限<br>即可開始合照體驗</div>
+      <button id="start-btn" onclick="userStart()">開啟相機</button>
+    </div>
+
+    <div id="stage-container">
+      <video id="camera-video" class="mirror" autoplay playsinline muted></video>
+      <div id="frame-overlay"></div>
+    </div>
+
+    <!-- 2. 操作按鈕列 -->
+    <div class="ui-bar" id="ui-bar">
+      <div class="hint">按下拍照鍵 即可存入相簿</div>
+      <div class="btn-row">
+        <div style="width: 48px;"></div>
+        <button id="shutter-btn" onclick="captureAndSave()" aria-label="拍照"></button>
+        <button id="switch-btn" onclick="toggleCamera()" aria-label="切換鏡頭">
+          <svg viewBox="0 0 24 24">
+            <path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <canvas id="render-canvas"></canvas>
+
+    <script>
+      const video = document.getElementById('camera-video');
+      const canvas = document.getElementById('render-canvas');
+      const startScreen = document.getElementById('start-screen');
+      const uiBar = document.getElementById('ui-bar');
+      
+      // 已將相框來源更新為 photo_frame.png
+      const frameImg = new Image();
+      frameImg.src = './photo_frame.png';
+
+      let currentFacingMode = 'user';
+      let currentStream = null;
+
+      // 使用者點擊按鈕啟用鏡頭
+      async function userStart() {
+        startScreen.style.display = 'none';
+        uiBar.style.display = 'flex';
+        await initCamera(currentFacingMode);
+      }
+
+      async function initCamera(facingMode) {
+        if (currentStream) {
+          currentStream.getTracks().forEach(track => track.stop());
+        }
+
+        try {
+          const constraints = {
+            audio: false,
+            video: {
+              facingMode: { ideal: facingMode },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 }
+            }
+          };
+
+          currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+          video.srcObject = currentStream;
+
+          if (facingMode === 'user') {
+            video.classList.add('mirror');
+          } else {
+            video.classList.remove('mirror');
+          }
+          currentFacingMode = facingMode;
+        } catch (err) {
+          alert('請確保於 Safari / Chrome 打開，並允許使用相機權限。');
+          console.error(err);
+        }
+      }
+
+      function toggleCamera() {
+        const targetMode = currentFacingMode === 'user' ? 'environment' : 'user';
+        initCamera(targetMode);
+      }
+
+      // 合成照片並喚起原生分享直接存入手機相簿
+      async function captureAndSave() {
+        if (!video.videoWidth || !frameImg.complete) return;
+
+        const targetWidth = frameImg.naturalWidth || 1080;
+        const targetHeight = frameImg.naturalHeight || 1920;
+
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        const ctx = canvas.getContext('2d');
+
+        // 計算裁切比例使其在相框背後自然填滿
+        const vWidth = video.videoWidth;
+        const vHeight = video.videoHeight;
+        const videoRatio = vWidth / vHeight;
+        const frameRatio = targetWidth / targetHeight;
+
+        let sWidth, sHeight, sx, sy;
+        if (videoRatio > frameRatio) {
+          sHeight = vHeight;
+          sWidth = vHeight * frameRatio;
+          sx = (vWidth - sWidth) / 2;
+          sy = 0;
+        } else {
+          sWidth = vWidth;
+          sHeight = vWidth / frameRatio;
+          sx = 0;
+          sy = (vHeight - sHeight) / 2;
+        }
+
+        // 繪製人像影像（自拍時保留鏡像）
+        ctx.save();
+        if (currentFacingMode === 'user') {
+          ctx.translate(targetWidth, 0);
+          ctx.scale(-1, 1);
+        }
+        ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, targetWidth, targetHeight);
+        ctx.restore();
+
+        // 疊加相框層
+        ctx.drawImage(frameImg, 0, 0, targetWidth, targetHeight);
+
+        // 封裝圖檔並調用系統分享介面
+        canvas.toBlob(async (blob) => {
+          const file = new File([blob], `PhotoFrame_${Date.now()}.png`, { type: 'image/png' });
+
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            try {
+              await navigator.share({
+                files: [file],
+                title: 'AR 相框合照',
+                text: '快來看看我的 AR 合照！'
+              });
+            } catch (error) {
+              if (error.name !== 'AbortError') {
+                fallbackDownload(blob);
+              }
+            }
+          } else {
+            fallbackDownload(blob);
+          }
+        }, 'image/png');
+      }
+
+      function fallbackDownload(blob) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `PhotoFrame_${Date.now()}.png`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    </script>
+  </body>
+</html>
